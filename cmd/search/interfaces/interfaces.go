@@ -27,3 +27,13 @@ type ISearchPayload struct {
 	Offset           int    `json:"offset"`
 	Limit            int    `json:"limit"`
 }
+
+type Hit struct {
+	Source map[string]interface{} `json:"_source"`
+}
+
+type SearchResponse struct {
+	Hits struct {
+		Hits []Hit `json:"hits"`
+	} `json:"hits"`
+}
