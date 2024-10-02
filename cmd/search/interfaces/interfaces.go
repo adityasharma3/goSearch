@@ -3,17 +3,17 @@ package interfaces
 import "github.com/golang-jwt/jwt"
 
 type SearchQueryParams struct {
-	CourseOfferingId string `json:"courseOfferingId"`
-	ActivityType     string `json:"activityType"`
-	Offset           int    `json:"offset"`
-	Limit            int    `json:"limit"`
+	CourseOfferingId string `form:"courseOfferingId"`
+	ActivityType     string `form:"activityType"`
+	Offset           int    `form:"offset"`
+	Limit            int    `form:"limit"`
 }
 
 type Token struct {
-	UserId    string `json:"userId"`
-	OrgId     string `json:"orgId"`
-	Role      string `json:"role"`
-	ContactId string `json:"contactId"`
+	UserId    string `json:"custom:userId"`
+	OrgId     string `json:"custom:orgId"`
+	Role      string `json:"custom:role"`
+	ContactId string `json:"custom:contactId"`
 	jwt.StandardClaims
 }
 
@@ -36,4 +36,37 @@ type SearchResponse struct {
 	Hits struct {
 		Hits []Hit `json:"hits"`
 	} `json:"hits"`
+}
+
+type ESResponse struct {
+	Aggregations Aggregations `json:"aggregations"`
+}
+
+type Aggregations struct {
+	ActivityType ActivityType `json:"activity_type"`
+}
+
+type ActivityType struct {
+	Buckets []Bucket `json:"buckets"`
+}
+
+type Bucket struct {
+	Key      string `json:"key"`
+	DocCount int    `json:"doc_count"`
+	Hits     Hits   `json:"activity_type"` // Assuming activity_type contains hits
+}
+
+type Hits struct {
+	Hits []Hit `json:"hits"`
+}
+
+type ActivityData struct {
+	// Define your activity data fields here
+	Name string `json:"name"`
+}
+
+type Result struct {
+	Type  string         `json:"type"`
+	Count int            `json:"count"`
+	Data  []ActivityData `json:"data"`
 }

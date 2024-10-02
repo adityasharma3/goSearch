@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/adityasharma3/goSearch/cmd/search/constants"
 	"github.com/adityasharma3/goSearch/cmd/search/interfaces"
 	elasticsearch "github.com/adityasharma3/goSearch/cmd/search/searchclient"
 	"github.com/gin-gonic/gin"
@@ -38,7 +40,7 @@ func Search(c *gin.Context) {
 
 	jwtToken := c.GetHeader("Authorization")
 	decodedToken, err := decodeJWT(jwtToken)
-	// log.Print(tokenData)
+
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "failed", "error": err})
 		log.Fatal(`JWT token could not be decoded`)
@@ -57,7 +59,7 @@ func Search(c *gin.Context) {
 
 	response, err := getSearchQueryResults(params)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, err)
+		c.JSON(http.StatusBadRequest, gin.H{"status": "failed", "error": err})
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -70,12 +72,22 @@ func getSearchQueryResults(payload interfaces.ISearchPayload) ([]map[string]inte
 	if payload.Role == "Student" {
 		mustConditions = append(mustConditions, map[string]interface{}{
 			"match": map[string]interface{}{
-				"status":    "published",
-				"isDeleted": false,
-				"orgId":     payload.OrgId,
+				"status": "published",
 			},
 		})
 	}
+	mustConditions = append(mustConditions,
+		map[string]interface{}{
+			"match": map[string]interface{}{
+				"isDeleted": false,
+			},
+		},
+		map[string]interface{}{
+			"match": map[string]interface{}{
+				"orgId": payload.OrgId,
+			},
+		},
+	)
 
 	if payload.CourseOfferingId != "" {
 		mustConditions = append(mustConditions, map[string]interface{}{
@@ -95,7 +107,7 @@ func getSearchQueryResults(payload interfaces.ISearchPayload) ([]map[string]inte
 
 	var matchCase []map[string]interface{}
 
-	if payload.Criteria == "Contains" {
+	if payload.Criteria == constants.Contains {
 		processedValue := strings.Split(payload.Value, " ")
 		for i, word := range processedValue {
 			processedValue[i] = "*" + word + "*"
@@ -112,7 +124,7 @@ func getSearchQueryResults(payload interfaces.ISearchPayload) ([]map[string]inte
 				"query":         strings.Join(processedValue, " "),
 			},
 		})
-	} else if payload.Criteria == "Exact" {
+	} else if payload.Criteria == constants.Exact {
 		matchCase = append(matchCase, map[string]interface{}{
 			"match_phrase": map[string]interface{}{
 				"description": payload.Value,
@@ -147,9 +159,11 @@ func getSearchQueryResults(payload interfaces.ISearchPayload) ([]map[string]inte
 		log.Fatalf("Error encoding query: %s", err)
 	}
 
+	indexes := dbPrefix + "-activitymetadata-index," + dbPrefix + "-contentmetadata-index," + dbPrefix + "-selftasks-index"
+
 	result, err := ESClient.Search(
 		ESClient.Search.WithContext(context.Background()),
-		ESClient.Search.WithIndex(dbPrefix+"-activitymetadata-index,"+dbPrefix+"-contentmetadata-index,"+dbPrefix+"-selftasks-index"),
+		ESClient.Search.WithIndex(indexes),
 		ESClient.Search.WithBody(&buf),
 		ESClient.Search.WithTrackTotalHits(true),
 		ESClient.Search.WithPretty(),
@@ -159,23 +173,49 @@ func getSearchQueryResults(payload interfaces.ISearchPayload) ([]map[string]inte
 		log.Fatalf("Error getting response from Elasticsearch: %s", err)
 	}
 
+	if result.StatusCode == 400 || result.StatusCode == 404 {
+		_, err := io.ReadAll(result.Body)
+		if err != nil {
+			log.Fatalf("Error reading response body: %v", err)
+			return nil, err
+		}
+	}
+
 	defer result.Body.Close()
 
-	var searchResponse interfaces.SearchResponse
+	var searchResponse map[string]interface{}
 	if err := json.NewDecoder(result.Body).Decode(&searchResponse); err != nil {
 		log.Fatalf("error parsing elastic search response body %s", err)
 	}
 
 	var sources []map[string]interface{}
-	for _, hit := range searchResponse.Hits.Hits {
-		sources = append(sources, hit.Source)
+	hits, ok := searchResponse["hits"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("not hits found for this search query")
+	}
+
+	hitsArray, ok := hits["hits"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("not hits found for this search query")
+	}
+
+	for _, hit := range hitsArray {
+		if hitMap, ok := hit.(map[string]interface{}); ok {
+			if source, exists := hitMap["_source"]; exists {
+				if sourceMap, ok := source.(map[string]interface{}); ok {
+					sources = append(sources, sourceMap)
+				}
+			}
+		}
 	}
 
 	return sources, nil
 }
 
 func decodeJWT(token string) (*interfaces.Token, error) {
-	token = token[len("Bearer"):]
+	if strings.Contains(token, "Bearer") {
+		token = token[len("Bearer"):]
+	}
 	parts := strings.Split(token, ".")
 
 	if len(parts) != 3 {

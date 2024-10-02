@@ -13,7 +13,7 @@ var (
 	once     sync.Once
 )
 
-func InitializeElasticSearch() {
+func InitializeElasticSearch() (*elasticsearch.Client, error) {
 	once.Do(func() {
 		config := elasticsearch.Config{
 			CloudID: os.Getenv("ELASTICSEARCH_CLOUD_ID"),
@@ -26,6 +26,8 @@ func InitializeElasticSearch() {
 		}
 		EsClient = client
 	})
+
+	return EsClient, nil
 }
 
 func GetElasticClient() *elasticsearch.Client {
